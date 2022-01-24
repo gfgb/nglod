@@ -75,6 +75,22 @@ inline __device__ __host__ float d2axmb(const float* a, float x, float3 b)
     return t0*t0 + t1*t1 + t2*t2;
 }
 
+inline __device__ __host__ float3 ax(const float* a, float x) {
+    return make_float3(a[0] * x, a[1] * x, a[2] * x);
+}
+
+inline __device__ __host__ void ax(const float* a, float x, float* res) {
+    res[0] = a[0] * x;
+    res[1] = a[1] * x;
+    res[2] = a[2] * x;
+}
+
+inline __device__ __host__ void axpb(const float* a, float x, const float* b, float* res) {
+    res[0] = a[0] * x + b[0];
+    res[1] = a[1] * x + b[1];
+    res[2] = a[2] * x + b[2];
+}
+
 inline __device__ __host__ float d2axmb(float3 a, float x, float3 b)
 {
     float t0 = a.x * x - b.x;
@@ -104,6 +120,18 @@ inline __host__ __device__ void cross(const float* a, const float* b, float* res
     res[0] = a[1]*b[2] - a[2]*b[1];
     res[1] = a[2]*b[0] - a[0]*b[2];
     res[2] = a[0]*b[1] - a[1]*b[0];
+}
+
+inline __host__ __device__ void vadd(const float* a, const float* b, float* res) {
+    res[0] = a[0] + b[0];
+    res[1] = a[1] + b[1];
+    res[2] = a[2] + b[2];
+}
+
+inline __host__ __device__ void vsub(const float* a, const float* b, float* res) {
+    res[0] = a[0] - b[0];
+    res[1] = a[1] - b[1];
+    res[2] = a[2] - b[2];
 }
 
 #define SUB(dest,v1,v2) \
@@ -169,6 +197,7 @@ __global__ void kernel_mesh2sdf(
         float inv_dot2_v02_val = inv_dot2_v02[i];
         float inv_dot2_nor_val = inv_dot2_nor[i];
 
+
         float3 p0, p1, p2;
         p0.x = point_ptr[0] - triangle_ptr[0];
         p0.y = point_ptr[1] - triangle_ptr[1];
@@ -183,6 +212,7 @@ __global__ void kernel_mesh2sdf(
         // if the normal vector is zero, the triangle is degenerative.
         if (nor_ptr[0] != 0.0f || nor_ptr[1] != 0.0f || nor_ptr[2] != 0.0f) {
                 
+
             float s1 = sign(dot(c_v10_nor_ptr, p0));
             float s2 = sign(dot(c_v21_nor_ptr, p1));
             float s3 = sign(dot(c_v02_nor_ptr, p2));
@@ -311,6 +341,7 @@ __global__ void kernel_mesh2sdf_quad(
     const float* __restrict__ mesh,
     float* __restrict__ output,
     uint8_t* __restrict__ raystab_results) {
+
     const int split_factor = SPLIT_FACTOR;
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     
@@ -442,7 +473,8 @@ __global__ void kernel_mesh2sdf_quad(
             }
             //distsq = fabs(distsq);
             mindistsq = fminf(mindistsq, distsq);
-        }
+
+        }   
         
         // Calculate inside/outside
         // With triangle-ray intersection
@@ -555,6 +587,271 @@ __global__ void kernel_mesh2sdf_quad(
     
 }
 
+__global__ void kernel_mesh2sdf_quad_tex(
+    const int num_points, 
+    const float* __restrict__ points,
+    const int num_triangles, 
+    const float* __restrict__ mesh,
+    const float* __restrict__ uv_mesh,
+    const float* __restrict__ tex,
+    const int tex_resolution,
+    float* __restrict__ out_col,
+    float* __restrict__ output,
+    uint8_t* __restrict__ raystab_results) {
+
+    const int split_factor = SPLIT_FACTOR;
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    int pindex = index % num_points;
+    int rindex = index / num_points;
+    
+    if (rindex >= split_factor) {
+        return;
+    }
+
+    int tranksize = (num_triangles + split_factor - 1) / split_factor;
+    int tstart = tranksize * rindex;
+    int tend = min(tstart + tranksize, num_triangles);
+    
+    // SPLIT_FACTOR, num_points, 13, 2
+    uint8_t* raystab_cache_base = raystab_results + rindex * num_points * 13 * 2 + pindex * 13 * 2;
+    // SPLIT_FACTOR, num_points
+    float* output_base = output + rindex * num_points;
+
+    float* output_base_col = out_col + rindex * num_points * 3;
+
+    const float* point_ptr = points + pindex * 3;
+    float mindistsq = INFINITY;
+    //int num_intersect = 0;
+    //int pos_intersect[13] = {0,0,0,0,0,0,0,0,0,0,0,0,0};
+    //int neg_intersect[13] = {0,0,0,0,0,0,0,0,0,0,0,0,0};
+    uint8_t* pos_intersect = raystab_cache_base;
+    uint8_t* neg_intersect = raystab_cache_base + 13;
+    
+    float stab_dir_table[13][3] = { {1.0f, 0.0f, 0.0f},
+                                    {0.0f, 1.0f, 0.0f},
+                                    {0.0f, 0.0f, 1.0f},
+                                    {0.0f, 0.707106781f, 0.707106781f},
+                                    {0.707106781f, 0.0f, 0.707106781f},
+                                    {0.707106781f, 0.707106781f, 0.0f},
+                                    {0.0f, 0.707106781f, -0.707106781f},
+                                    {0.707106781f, 0.0f, -0.707106781f},
+                                    {0.707106781f, -0.707106781f, 0.0f},
+                                    {0.577350269f, 0.577350269f, 0.577350269f},
+                                    {-0.577350269f, 0.577350269f, 0.577350269f},
+                                    {0.577350269f, -0.577350269f, 0.577350269f},
+                                    {0.577350269f, 0.577350269f, -0.577350269f}};
+    
+    // Loop over each triangle
+    //for (int i=0; i<num_triangles; i++) {
+    for (int i = tstart; i < tend; i++) {
+    
+        const float* triangle_ptr = mesh + i * 9;
+        const float* uv_ptr = uv_mesh + i * 6;
+
+        ////
+        // const float* col_ptr = mesh_vcol + i * 9;
+        ////
+
+        // compute vectors from edges of triangle
+        float v10_ptr[3];
+        float v21_ptr[3];
+        float v02_ptr[3];
+        v10_ptr[0] = triangle_ptr[3] - triangle_ptr[0];
+        v10_ptr[1] = triangle_ptr[4] - triangle_ptr[1];
+        v10_ptr[2] = triangle_ptr[5] - triangle_ptr[2];
+        v21_ptr[0] = triangle_ptr[6] - triangle_ptr[3];
+        v21_ptr[1] = triangle_ptr[7] - triangle_ptr[4];
+        v21_ptr[2] = triangle_ptr[8] - triangle_ptr[5];
+        v02_ptr[0] = triangle_ptr[0] - triangle_ptr[6];
+        v02_ptr[1] = triangle_ptr[1] - triangle_ptr[7];
+        v02_ptr[2] = triangle_ptr[2] - triangle_ptr[8];
+        
+
+        // compute normal vector of triangle
+        float nor_ptr[3];
+        cross(v10_ptr, v02_ptr, nor_ptr);
+        
+        // compute vector perpendicular to normal and each edge
+        float c_v10_nor_ptr[3];
+        float c_v21_nor_ptr[3];
+        float c_v02_nor_ptr[3];
+        cross(v10_ptr, nor_ptr, c_v10_nor_ptr);
+        cross(v21_ptr, nor_ptr, c_v21_nor_ptr);
+        cross(v02_ptr, nor_ptr, c_v02_nor_ptr);
+        
+        float inv_dot2_v10_val = idot2(v10_ptr);
+        float inv_dot2_v21_val = idot2(v21_ptr);
+        float inv_dot2_v02_val = idot2(v02_ptr);
+        float inv_dot2_nor_val = idot2(nor_ptr);
+        
+        float p0[3], p1[3], p2[3];
+        p0[0] = point_ptr[0] - triangle_ptr[0];
+        p0[1] = point_ptr[1] - triangle_ptr[1];
+        p0[2] = point_ptr[2] - triangle_ptr[2];
+        p1[0] = point_ptr[0] - triangle_ptr[3];
+        p1[1] = point_ptr[1] - triangle_ptr[4];
+        p1[2] = point_ptr[2] - triangle_ptr[5];
+        p2[0] = point_ptr[0] - triangle_ptr[6];
+        p2[1] = point_ptr[1] - triangle_ptr[7];
+        p2[2] = point_ptr[2] - triangle_ptr[8];
+     
+        // if the normal vector is zero, the triangle is degenerative.
+        if (nor_ptr[0] != 0.0f || nor_ptr[1] != 0.0f || nor_ptr[2] != 0.0f) {
+                
+            float s1 = sign(dot(c_v10_nor_ptr, p0));
+            float s2 = sign(dot(c_v21_nor_ptr, p1));
+            float s3 = sign(dot(c_v02_nor_ptr, p2));
+            
+            float distsq;
+            int edge = 0;
+
+            if ((s1+s2+s3) < 2.0f) {
+                // Edge dist
+                float ed1 = d2axmb(v10_ptr, clamp(dot(v10_ptr, p0) * inv_dot2_v10_val, 0.0f, 1.0f), p0);
+                float ed2 = d2axmb(v21_ptr, clamp(dot(v21_ptr, p1) * inv_dot2_v21_val, 0.0f, 1.0f), p1);
+                float ed3 = d2axmb(v02_ptr, clamp(dot(v02_ptr, p2) * inv_dot2_v02_val, 0.0f, 1.0f), p2);
+                distsq = fminf(ed1, fminf(ed2, ed3));
+
+                //// ugly but clear
+                if      (ed1 < ed2 && ed1 < ed3) edge = 1;
+                else if (ed2 < ed1 && ed2 < ed3) edge = 2;
+                else if (ed3 < ed1 && ed3 < ed2) edge = 3;
+                ////
+
+            } else {
+                // Face dist
+                distsq = dot(nor_ptr, p0) * dot(nor_ptr, p0) * inv_dot2_nor_val;
+            }
+
+            if (distsq < 0.0f) distsq = 0.0f;
+
+            // mindistsq = fminf(mindistsq, distsq);
+
+            //// compute color at nearest point
+            if (distsq < mindistsq) { 
+
+                mindistsq = distsq;
+
+                // float inv_norlen = sqrtf(inv_dot2_nor_val);
+                // output_base_col[pindex * 3]     = fabs(nor_ptr[0] * inv_norlen);
+                // output_base_col[pindex * 3 + 1] = fabs(nor_ptr[1] * inv_norlen);
+                // output_base_col[pindex * 3 + 2] = fabs(nor_ptr[2] * inv_norlen);
+
+                float contact_ptr[3];
+                
+                // find the contact point
+                if (edge == 1) {
+                    axpb(v10_ptr, clamp(dot(v10_ptr, p0) * inv_dot2_v10_val, 0.0f, 1.0f), triangle_ptr, contact_ptr);
+                } else if (edge == 2) {
+                    axpb(v21_ptr, clamp(dot(v21_ptr, p1) * inv_dot2_v21_val, 0.0f, 1.0f), triangle_ptr + 3, contact_ptr);
+                } else if (edge == 3) {
+                    axpb(v02_ptr, clamp(dot(v02_ptr, p2) * inv_dot2_v02_val, 0.0f, 1.0f), triangle_ptr + 6, contact_ptr);
+                } else { // face
+                    float t = sqrtf(distsq * inv_dot2_nor_val);
+                    t = dot(p0, nor_ptr) >= 0.0f ? -t : t;
+                    axpb(nor_ptr, t, point_ptr, contact_ptr);
+                }
+
+                float vp1[3], vp2[3], C[3];
+                vp1[0] = contact_ptr[0] - triangle_ptr[3];
+                vp1[1] = contact_ptr[1] - triangle_ptr[4];
+                vp1[2] = contact_ptr[2] - triangle_ptr[5];
+                vp2[0] = contact_ptr[0] - triangle_ptr[6];
+                vp2[1] = contact_ptr[1] - triangle_ptr[7];
+                vp2[2] = contact_ptr[2] - triangle_ptr[8];
+
+                float u_t, v_t;
+                cross(v21_ptr, vp1, C);
+                u_t = sqrtf(dot(C, C) * inv_dot2_nor_val);
+                cross(v02_ptr, vp2, C);
+                v_t = sqrtf(dot(C, C) * inv_dot2_nor_val);
+
+                float u = (1.0f - u_t - v_t) * uv_ptr[4] + u_t * uv_ptr[0] + v_t * uv_ptr[2];
+                float v = (1.0f - u_t - v_t) * uv_ptr[5] + u_t * uv_ptr[1] + v_t * uv_ptr[3];
+                v = 1.0f - v;
+                
+                u = fmodf(u, 1.0f);
+                v = fmodf(v, 1.0f);
+                u = u < 0.0f ? 1.0f + u : u;
+                v = v < 0.0f ? 1.0f + v : v;
+
+                int px_row, px_col, px;
+                px_col = static_cast<int>(u * tex_resolution);
+                px_row = static_cast<int>(v * tex_resolution);
+                px = (px_row * tex_resolution + px_col) * 3;
+
+                output_base_col[pindex * 3]     = tex[px];
+                output_base_col[pindex * 3 + 1] = tex[px + 1];
+                output_base_col[pindex * 3 + 2] = tex[px + 2];
+
+            }
+            ////
+        }   
+        
+        // Calculate inside/outside
+        // With triangle-ray intersection
+        // center: point_ptr
+        // direction: -point_ptr
+        // Triangle: triangle_ptr [x y z x y z x y z]
+        float3 edge2;
+        float* edge1 = v10_ptr;
+        edge2.x = -v02_ptr[0];
+        edge2.y = -v02_ptr[1];
+        edge2.z = -v02_ptr[2];
+        
+        float3 dir;
+        
+        // test 4 directions
+        // more directions:
+        // (1 0 0), (0 1 0), (0 0 1)
+        // (1 1 0), (1 0 1), (0 1 1)
+        // (1 -1 0), (1 0 -1), (0 1 -1)
+        // (1 1 1), (1 1 -1), (1 -1 1), (-1 1 1)
+        for (int i=0; i<13; i++) {
+            dir.x = stab_dir_table[i][0];
+            dir.y = stab_dir_table[i][1];
+            dir.z = stab_dir_table[i][2];
+
+            float3 pvec = cross(dir, edge2);
+            float det = dot(edge1, pvec);
+            
+            if (det > -1e-8 && det < 1e-8) // No intersection at all
+                continue;
+            float inv_det = 1.0f / det;
+            
+            float3 tvec;
+            tvec.x = point_ptr[0] - triangle_ptr[0];
+            tvec.y = point_ptr[1] - triangle_ptr[1];
+            tvec.z = point_ptr[2] - triangle_ptr[2];
+            
+            
+            // Calculate barycentric uvs
+            float u = dot(tvec, pvec) * inv_det;
+            if (u < 0.0f || u > 1.0f) { // u out of bound
+                continue;
+            }
+            float3 qvec = cross(tvec, edge1);
+            
+            float v = dot(dir, qvec) * inv_det;
+            if (v < 0.0f || u + v > 1.0f) {
+                continue;
+            }
+            
+            // Ray intersects triangle
+            float t = dot(edge2, qvec) * inv_det;
+
+            if (t >= 0.0f)
+                pos_intersect[i] = 1;
+            else
+                neg_intersect[i] = 1;
+        }
+    }
+    
+    output_base[pindex] = mindistsq;
+    
+}
+
 __global__ void kernel_quad_aggr(
     const int num_points, 
     const int num_triangles, 
@@ -612,6 +909,65 @@ __global__ void kernel_quad_aggr(
     } else {
         mindist = -1e-6f;
     }*/
+    final_output[index] = mindist;
+}
+
+__global__ void kernel_quad_aggr_col(
+    const int num_points, 
+    const int num_triangles, 
+    const float* __restrict__ output_temp,
+    const float* __restrict__ output_color_temp,
+    const uint8_t* __restrict__ raystab_results,
+    float* __restrict__ final_output,
+    float* __restrict__ final_output_col) {
+    
+    const int split_factor = SPLIT_FACTOR;
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (index >= num_points) {
+        return;
+    }
+    
+    // for each point in 3D space
+    int outside = 0;
+    for (int i=0; i<13; i++) {
+        uint8_t pos_aggr = 0;
+        uint8_t neg_aggr = 0;
+        for (int s=0; s<SPLIT_FACTOR; s++) {
+            const uint8_t* raystab_cache_base = raystab_results + s * num_points * 13 * 2 + index * 13 * 2;
+            const uint8_t* pos_intersect = raystab_cache_base;
+            const uint8_t* neg_intersect = raystab_cache_base + 13;
+            pos_aggr = pos_aggr | pos_intersect[i];
+            neg_aggr = neg_aggr | neg_intersect[i];
+        }
+        if (pos_aggr == 0 || neg_aggr == 0) { // if outside
+            outside = 1;
+            break;
+        }
+    }
+    
+    float mindist;
+    float mindistsq = INFINITY;
+    for (int s=0; s<SPLIT_FACTOR; s++) {
+        const float* output_base = output_temp + s * num_points;
+        float curdistsq = output_base[index];
+        if (curdistsq < mindistsq) {
+            mindistsq = curdistsq;
+            const float* output_base_col = output_color_temp + s * num_points * 3;
+            int idx3 = index * 3;
+            final_output_col[idx3] = output_base_col[idx3];
+            final_output_col[idx3 + 1] = output_base_col[idx3 + 1];
+            final_output_col[idx3 + 2] = output_base_col[idx3 + 2];
+        }
+    }
+    if (mindistsq < 0.0f) {
+        mindistsq = 0.0f;
+    }
+    mindist = sqrtf(mindistsq);
+    if (!outside) {
+        mindist = -mindist;
+    }
+ 
     final_output[index] = mindist;
 }
 
@@ -926,6 +1282,55 @@ std::vector<torch::Tensor> mesh2sdf_gpu_fast_nopre(
     return {out_dist};
 }
 
+////
+std::vector<torch::Tensor> mesh2sdf_gpu_fast_nopre_tex(
+    torch::Tensor& points,
+    torch::Tensor& mesh,
+    torch::Tensor& uv_mesh,
+    torch::Tensor& tex,
+    const int tex_resolution) {
+    
+    // Step 1: create an empty tensor to store the output.
+    int num_points = points.size(0);
+    torch::Tensor out_dist = torch::empty({num_points}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+    torch::Tensor out_dist_temp = torch::empty({SPLIT_FACTOR, num_points}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+
+    ////
+    torch::Tensor out_color_temp = torch::empty({SPLIT_FACTOR, num_points, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+    torch::Tensor out_color = torch::empty({num_points, 3}, torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA));
+    ////
+
+    int num_triangles = mesh.size(0);
+    
+    torch::Tensor raystab_results = torch::zeros({SPLIT_FACTOR, num_points, 13, 2}, torch::TensorOptions().dtype(torch::kUInt8).device(torch::kCUDA));
+    
+    // Step 2: for each point, find its distance to mesh
+    // Assume all the arrays are contiguous.
+    // <<<Dg, Db, Ns, S>>>
+    kernel_mesh2sdf_quad_tex<<< (num_points * SPLIT_FACTOR + CUDA_NUM_THREADS - 1)/CUDA_NUM_THREADS, CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream() >>>(
+        num_points,
+        points.data<float>(), 
+        num_triangles,
+        mesh.data<float>(),
+        uv_mesh.data<float>(),
+        tex.data<float>(),
+        tex_resolution,
+        // out_color.data<float>(),
+        out_color_temp.data<float>(),
+        out_dist_temp.data<float>(),
+        raystab_results.data<uint8_t>());
+        
+    kernel_quad_aggr_col<<<(num_points + CUDA_NUM_THREADS_AGGR - 1)/CUDA_NUM_THREADS_AGGR, CUDA_NUM_THREADS_AGGR, 0, at::cuda::getCurrentCUDAStream() >>>(
+        num_points,
+        num_triangles,
+        out_dist_temp.data<float>(),
+        out_color_temp.data<float>(),
+        raystab_results.data<uint8_t>(),
+        out_dist.data<float>(),
+        out_color.data<float>());
+    
+    return {out_dist, out_color};
+}
 
 std::vector<torch::Tensor> triangle2sdf_gpu_forward(
     torch::Tensor& points,
@@ -1009,6 +1414,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("mesh2sdf_gpu", &mesh2sdf_gpu_fast_nopre, "Mesh2SDF GPU Fast Version No Precomputation");
     m.def("trimmesh_gpu", &trimmesh_gpu, "TrimMesh GPU");
     m.def("p2f_gpu", &triangle2sdf_gpu_forward, "Point to face distance");
+
+    ////
+    // m.def("mesh2sdf_gpu_vcol", &mesh2sdf_gpu_fast_nopre_vcol, "Mesh2SDF GPU Fast Version No Precomputation with vertex color");
+    m.def("mesh2sdf_gpu_tex", &mesh2sdf_gpu_fast_nopre_tex, "Mesh2SDF GPU Fast Version No Precomputation with texture mapping");
+    ////
 }
 
 

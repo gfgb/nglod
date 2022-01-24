@@ -29,7 +29,7 @@ import argparse
 import glob
 import logging as log
 
-from lib.trainer import Trainer
+from lib.trainer import Trainer_VC
 from lib.options import parse_options
 
 # Set logger display format
@@ -42,7 +42,15 @@ if __name__ == "__main__":
     """Main program."""
 
     args, args_str = parse_options()
+
+    g = list(globals().items())
+    for x in g:
+        if x[0] == "args_str": continue
+        print(x)
+    for x in g[-1][1].split("\n"): print(x)
+
     log.info(f'Parameters: \n{args_str}')
     log.info(f'Training on {args.dataset_path}')
-    model = Trainer(args, args_str)
+    # model = Trainer(args, args_str)ù
+    model = Trainer_VC(args, args_str)
     model.train()

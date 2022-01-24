@@ -91,7 +91,9 @@ if __name__ == '__main__':
     else:
         assert False and "No network weights specified!"
 
-    net = globals()[args.net](args)
+    # net = globals()[args.net](args)
+    net = OctreeSDF_VC(args)
+    
     if args.jit:
         net = torch.jit.script(net)
 
@@ -124,7 +126,8 @@ if __name__ == '__main__':
         if not os.path.exists(_dir):
             os.makedirs(_dir)
 
-    tracer = globals()[args.tracer](args)
+    # tracer = globals()[args.tracer](args)
+    tracer = SphereTracer_VC(args)
     renderer = Renderer(tracer, args=args, device=device)
 
     if args.rotate is not None:

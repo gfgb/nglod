@@ -42,15 +42,15 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm
 
-from .datasets import *
-from .diffutils import positional_encoding, gradient
-from .models import *
-from .renderer import Renderer
-from .tracer import *
-from .utils import PerfTimer, image_to_np, suppress_output
-from .validator import *
+from lib.datasets import *
+from lib.diffutils import positional_encoding, gradient
+from lib.models import *
+from lib.renderer import Renderer
+from lib.tracer import *
+from lib.utils import PerfTimer, image_to_np, suppress_output
+from lib.validator import *
 
-class Trainer(object):
+class Trainer_VC(object):
     """
     Base class for the trainer.
 
@@ -85,7 +85,6 @@ class Trainer(object):
     #######################
     # __init__
     #######################
-    
     def __init__(self, args, args_str):
         """Constructor.
         
@@ -150,8 +149,9 @@ class Trainer(object):
         The code uses the mesh dataset by default, unless --analytic is specified in CLI.
         """
 
-        self.train_dataset = globals()[self.args.mesh_dataset](self.args)
-        
+        # self.train_dataset = MeshDataset_VC(self.args)
+        self.train_dataset = MeshDataset_TEX(self.args)
+
         self.train_data_loader = DataLoader(self.train_dataset, batch_size=self.args.batch_size, 
                                             shuffle=True, pin_memory=True, num_workers=0)
         self.timer.check('create_dataloader')
@@ -162,7 +162,10 @@ class Trainer(object):
         Override this function if using a custom network, that does not use the default args based
         initialization, or if you need a custom network initialization scheme.
         """
-        self.net = globals()[self.args.net](self.args)
+        # self.net = globals()[self.args.net](self.args)
+        
+        self.net = OctreeSDF_VC(self.args)
+
         if self.args.jit:
             self.net = torch.jit.script(self.net)
 
@@ -191,9 +194,10 @@ class Trainer(object):
         Override this function to use custom renderers.
         """
         # Renderer for logging
-        self.log_tracer = globals()[self.args.tracer](self.args)
+        # self.log_tracer = globals()[self.args.tracer](self.args)
+        self.log_tracer = SphereTracer_VC(self.args)
         self.renderer = Renderer(self.log_tracer, args=self.args)
-
+    
     def set_logger(self):
         """
         Override this function to use custom loggers.
@@ -235,7 +239,7 @@ class Trainer(object):
         if self.args.only_last:
             self.loss_lods = self.loss_lods[-1:]
 
-        if epoch % self.args.resample_every == 0:
+        if epoch > 0 and epoch % self.args.resample_every == 0:
             self.resample(epoch)
             log.info("Reset DataLoader")
             self.train_data_loader = DataLoader(self.train_dataset, batch_size=self.args.batch_size, 
@@ -300,7 +304,8 @@ class Trainer(object):
 
         pts = data[0].to(self.device)
         gts = data[1].to(self.device)
-        nrm = data[2].to(self.device) if self.args.get_normals else None
+        # nrm = data[2].to(self.device) if self.args.get_normals else None
+        col = data[2].to(self.device)
 
         # Prepare for inference
         batch_size = pts.shape[0]
@@ -311,6 +316,19 @@ class Trainer(object):
 
         l2_loss = 0.0
         _l2_loss = 0.0
+        loss_d, loss_col = 0.0, 0.0
+
+        # preds = []
+        # if self.args.return_lst:
+        #     preds = self.net.sdf(pts, return_lst=self.args.return_lst)
+        #     preds = [preds[i] for i in self.loss_lods]
+        # else:
+        #     for i, lod in enumerate(self.loss_lods):
+        #         preds.append(self.net.sdf(pts, lod=lod))
+
+        # for pred in preds:
+        #     _l2_loss = ((pred - torch.cat((gts, col), dim=1))**2).sum()
+        #     l2_loss += _l2_loss
 
         preds = []
         if self.args.return_lst:
@@ -320,21 +338,27 @@ class Trainer(object):
             for i, lod in enumerate(self.loss_lods):
                 preds.append(self.net.sdf(pts, lod=lod))
 
-        for pred in preds:
-            _l2_loss = ((pred - gts)**2).sum()
-            l2_loss += _l2_loss
+        for pred_d, pred_col in preds:
+            # _l2_loss = ((torch.cat((pred_d, pred_col), dim=1) - torch.cat((gts, col), dim=1)) ** 2).sum()
+            loss_d = ((pred_d - gts) ** 2).sum()
+            loss_col = ((pred_col - col) ** 2).sum()
+            l2_loss += loss_d + loss_col
 
         loss += l2_loss
 
         # Update logs
-        self.log_dict['l2_loss'] += _l2_loss.item()
+        self.log_dict['l2_loss'] += _l2_loss.item() if type(_l2_loss) == torch.Tensor else _l2_loss
         self.log_dict['total_loss'] += loss.item()
         self.log_dict['total_iter_count'] += batch_size
 
         loss /= batch_size
+        loss_d /= batch_size
+        loss_col /= batch_size
 
         # Backpropagate
         loss.backward()
+        # loss_d.backward(retain_graph=True)
+        # loss_col.backward()
         self.optimizer.step()
     
     #######################
@@ -382,7 +406,7 @@ class Trainer(object):
         log_text += ' | l2 loss: {:>.3E}'.format(self.log_dict['l2_loss'])
         
         self.writer.add_scalar('Loss/l2_loss', self.log_dict['l2_loss'], epoch)
-
+        
         log.info(log_text)
 
         # Log losses
@@ -419,10 +443,10 @@ class Trainer(object):
         if len(log_comps) > 1:
             _path = os.path.join(self.args.model_path, *log_comps[:-1])
             if not os.path.exists(_path):
-                os.makedirs(_path)
+                os.makedirs(_path, exist_ok=True)
 
         if not os.path.exists(self.args.model_path):
-            os.makedirs(self.args.model_path)
+            os.makedirs(self.args.model_path, exist_ok=True)
 
         if self.args.save_as_new:
             model_fname = os.path.join(self.args.model_path, f'{self.log_fname}-{epoch}.pth')
@@ -430,6 +454,14 @@ class Trainer(object):
             model_fname = os.path.join(self.args.model_path, f'{self.log_fname}.pth')
         
         log.info(f'Saving model checkpoint to: {model_fname}')
+        
+        ################################################
+        ################################################
+        # with open(f"epochlog/aaa_{epoch}", "w") as f:
+        #     f.write("aaa")
+        ################################################
+        ################################################
+        
         if self.args.save_all:
             torch.save(self.net, model_fname)
         else:
@@ -497,4 +529,3 @@ class Trainer(object):
                 score_total += score
             log_text += ' | {}: {:.2f}'.format(k, score_total / len(v))
         log.info(log_text)
-
