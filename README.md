@@ -1,4 +1,15 @@
-# Neural Geometric Level of Detail: Real-time Rendering with Implicit 3D Surfaces
+###### This repository is a fork of [Neural Geometric Level of Detail](https://github.com/nv-tlabs/nglod) by Takikawa et al.
+
+# Neural LOD for Color and Shape
+Master's degree in Computer Science\
+Sapienza University of Rome
+
+## Description
+
+The goal of this project is to expand of the method for neural shape encoding proposed in [NGLOD](https://github.com/nv-tlabs/nglod) with the encoding of varying surface information (such as color, reflectivity, roughness, etc), by using the same LOD-based method to generate the implicit representation of a 3D texture.
+
+## Results so far
+<!-- # Neural Geometric Level of Detail: Real-time Rendering with Implicit 3D Surfaces
 
 Official code release for NGLOD. For technical details, please refer to:
 
@@ -173,3 +184,4 @@ We also thank Clement Fuji Tsang for his help with the code release.
 
 The structure of this repo was inspired by PIFu: https://github.com/shunsukesaito/PIFu
 
+ -->
