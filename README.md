@@ -6,9 +6,34 @@ Sapienza University of Rome
 
 ## Description
 
-The goal of this project is to expand of the method for neural shape encoding proposed in [NGLOD](https://github.com/nv-tlabs/nglod) with the encoding of varying surface information (such as color, reflectivity, roughness, etc), by using the same LOD-based method to generate the implicit representation of a 3D texture.
+The goal of this project is to expand the method for neural shape encoding proposed in [NGLOD](https://github.com/nv-tlabs/nglod) with the encoding of varying surface information, by using the same LOD-based method to generate the implicit representation of a 3D texture.\
+The method can be applied to encode any type of surface information defined via 2D textures.
+## Results
 
-## Results so far
+#### Doom combat scene by [Artec 3D](https://www.artec3d.com/)
+<img src="https://user-images.githubusercontent.com/28317156/150802578-f4c8023f-9c46-4f88-9a66-d9f6a356e59a.jpg" width=50% height=50%>
+
+#### Earring
+<img src="https://user-images.githubusercontent.com/28317156/150802760-d237d9f0-95f8-4f24-aa5d-d8edd6720e29.jpg" width=50% height=50%>
+
+#### Horn
+<img src="https://user-images.githubusercontent.com/28317156/150804352-6b40793a-6aad-454e-83d3-11bb9ac80b15.jpg" width=50% height=50%>
+
+#### Telephone
+<img src="https://user-images.githubusercontent.com/28317156/150804428-37e521b0-8183-4aaf-a90e-8bd58b25cbfd.jpg" width=50% height=50%>
+
+#### Veronica
+<img src="https://user-images.githubusercontent.com/28317156/150804414-63de4646-7c73-4c4f-8e81-3b9fa617d959.jpg" width=50% height=50%>
+
+#### Violin
+<img src="https://user-images.githubusercontent.com/28317156/150804343-c76c7062-921e-4b19-a9b2-26d092bcc675.jpg" width=50% height=50%>
+
+#### Vessel
+<img src="https://user-images.githubusercontent.com/28317156/150804395-e538620e-9000-4684-99e6-2e5d57819288.jpg" width=50% height=50%>
+
+#### Pistol
+<img src="https://user-images.githubusercontent.com/28317156/150804377-c9063a99-3ccb-4cff-9420-03daf9be2fdf.jpg" width=50% height=50%>
+
 <!-- # Neural Geometric Level of Detail: Real-time Rendering with Implicit 3D Surfaces
 
 Official code release for NGLOD. For technical details, please refer to:
