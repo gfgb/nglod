@@ -6,8 +6,7 @@ Sapienza University of Rome
 
 ## Description
 
-The goal of this project is to expand the method for neural shape encoding proposed in [NGLOD](https://github.com/nv-tlabs/nglod) with the encoding of varying surface information, by using the same LOD-based method to generate the implicit representation of a 3D texture.\
-The method can be applied to encode any type of surface information defined via 2D textures.
+The goal of this project is to expand the method for neural shape encoding proposed in [NGLOD](https://github.com/nv-tlabs/nglod) with the encoding of varying surface information, by using the same LOD-based method to generate the implicit representation of a 3D texture. The method can be applied to encode any type of surface information defined via 2D textures.
 ## Results
 
 #### Doom combat scene by [Artec 3D](https://www.artec3d.com/)
